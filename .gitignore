@@ -1,0 +1,22 @@
+node_modules/
+
+# Secrets. .env.example is the committed template.
+.env
+.env.*
+!.env.example
+
+# Uploaded prescriptions and lab reports — patient data, never in version control.
+storage/
+
+logs/
+*.log
+npm-debug.log*
+
+coverage/
+.nyc_output/
+
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

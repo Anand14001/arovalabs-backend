@@ -1,0 +1,30 @@
+# Optional local Postgres, for working offline or against throwaway data.
+#
+# The normal setup points DATABASE_URL at the hosted Prisma Postgres instead, so
+# this is a fallback rather than a requirement. Nothing here runs on the server:
+# cPanel has no Docker, and the database there is the same hosted one.
+#
+# Host port 5433 so this never collides with a Postgres already installed.
+#   DATABASE_URL="postgres://arova:arova@localhost:5433/arova_labs"
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: arova-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: arova_labs
+      POSTGRES_USER: arova
+      POSTGRES_PASSWORD: arova
+    ports:
+      - '5433:5432'
+    volumes:
+      - arova-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U arova -d arova_labs']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  arova-pg-data:

@@ -1,0 +1,1253 @@
+// Arova Labs — data model.
+//
+// PostgreSQL, hosted (Prisma Postgres). The database is remote, so cPanel never
+// has to provide one: the app dials out over TLS and the same URL works from
+// Vercel, Render and cPanel alike. The one thing to verify per host is that
+// outbound 5432 is permitted.
+//
+// Json columns are used only where the value is read as a whole and never
+// queried; anything filterable or sortable gets a real child table. VarChar
+// lengths are deliberate input limits, not storage tuning.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- enums
+
+enum ProductType {
+  TEST
+  PACKAGE
+}
+
+enum PublishStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  SCHEDULED
+  SAMPLE_COLLECTED
+  IN_LAB
+  REPORT_READY
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PENDING
+  PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+  FAILED
+}
+
+enum PaymentState {
+  CREATED
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  REFUNDED
+}
+
+enum RefundState {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+enum CollectionType {
+  HOME
+  WALK_IN
+}
+
+enum CartStatus {
+  ACTIVE
+  CONVERTED
+  ABANDONED
+  EXPIRED
+}
+
+enum CouponType {
+  PERCENT
+  FIXED
+}
+
+enum CouponScope {
+  ALL
+  PRODUCTS
+  CATEGORIES
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNDISCLOSED
+}
+
+enum UploadKind {
+  PRESCRIPTION
+  REPORT
+  PRODUCT_IMAGE
+  CONTENT_IMAGE
+  OTHER
+}
+
+enum ScanStatus {
+  PENDING
+  CLEAN
+  INFECTED
+  SKIPPED
+}
+
+enum PrescriptionStatus {
+  RECEIVED
+  REVIEWED
+  QUOTED
+  CONVERTED
+  REJECTED
+}
+
+enum ReportStatus {
+  PENDING
+  UPLOADED
+  PUBLISHED
+  WITHDRAWN
+}
+
+enum LeadStatus {
+  NEW
+  IN_PROGRESS
+  RESOLVED
+  SPAM
+}
+
+enum SubscriberStatus {
+  PENDING
+  SUBSCRIBED
+  UNSUBSCRIBED
+  BOUNCED
+}
+
+// One role for now, by decision. The column stays so finer roles can be added
+// later without a migration; nothing branches on it today.
+enum UserRole {
+  SUPER_ADMIN
+}
+
+enum PageLayout {
+  RICH_TEXT
+  SECTIONS
+}
+
+enum FaqGroup {
+  HOME
+  PRODUCT
+  GENERAL
+}
+
+enum NavMenu {
+  HEADER
+  FOOTER_QUICK
+  FOOTER_LEGAL
+}
+
+enum SettingType {
+  STRING
+  TEXT
+  NUMBER
+  BOOLEAN
+  JSON
+}
+
+// ---------------------------------------------------------------- catalog
+
+model Product {
+  id          Int           @id @default(autoincrement())
+  slug        String        @unique @db.VarChar(191)
+  title       String        @db.VarChar(255)
+  type        ProductType
+  status      PublishStatus @default(DRAFT)
+  sku         String?       @db.VarChar(64)
+
+  // Stored in paise//cents as integers. Floating point money is a bug waiting
+  // to be filed; every total in this schema is an integer minor unit.
+  regularPrice Int
+  salePrice    Int
+
+  cardExcerpt String? @db.VarChar(500)
+  excerpt     String? @db.Text
+  // A second intro paragraph, used on some packages.
+  excerptSecondary String? @db.Text
+  overview    String? @db.Text
+
+  // "9 Profiles, 62 Tests" — the summary line on a package card.
+  profiles String? @db.VarChar(191)
+
+  cardImageId    Int?
+  detailImageId  Int?
+  archiveImageId Int?
+
+  // Read as a whole, never queried: ["NABL Accredited", ...]
+  badges Json?
+  ribbon String? @db.VarChar(120)
+
+  menuOrder  Int     @default(0)
+  isFeatured Boolean @default(false)
+
+  // Logistics shown on the detail page.
+  sampleType      String? @db.VarChar(120)
+  fastingRequired Boolean @default(false)
+  fastingNote     String? @db.VarChar(255)
+  turnaroundHours Int?
+  reportFormat    String? @db.VarChar(120)
+
+  // The reference site leaks a PHP warning instead of a parameter list on one
+  // product. Modelled explicitly so the site can say "unavailable" on purpose.
+  parametersUnavailable Boolean @default(false)
+  showAllParametersCta  Boolean @default(false)
+
+  metaTitle       String? @db.VarChar(255)
+  metaDescription String? @db.VarChar(500)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  publishedAt DateTime?
+
+  cardImage    Upload? @relation("ProductCardImage", fields: [cardImageId], references: [id], onDelete: SetNull)
+  detailImage  Upload? @relation("ProductDetailImage", fields: [detailImageId], references: [id], onDelete: SetNull)
+  archiveImage Upload? @relation("ProductArchiveImage", fields: [archiveImageId], references: [id], onDelete: SetNull)
+
+  parameters      ProductParameter[]
+  parameterGroups ProductParameterGroup[]
+  highlights      ProductHighlight[]
+  preparation     ProductPreparationStep[]
+  process         ProductProcessStep[]
+  audience        ProductAudienceItem[]
+  faqs            ProductFaq[]
+  categories      ProductCategory[]
+  tags            ProductTag[]
+  cartItems       CartItem[]
+  orderItems      OrderItem[]
+  couponProducts  CouponProduct[]
+
+  @@index([type, status])
+  @@index([status, menuOrder])
+  @@index([salePrice])
+  @@map("products")
+}
+
+// The bullet list on a package card — a short sell, distinct from the full
+// parameter list on the detail page.
+model ProductHighlight {
+  id        Int    @id @default(autoincrement())
+  productId Int
+  name      String @db.VarChar(255)
+  order     Int    @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, order])
+  @@map("product_highlights")
+}
+
+model ProductParameter {
+  id        Int    @id @default(autoincrement())
+  productId Int
+  name      String @db.VarChar(255)
+  order     Int    @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, order])
+  @@map("product_parameters")
+}
+
+// Packages present parameters grouped ("Lipid Profile (8 tests)"), tests present
+// them flat. Both shapes exist on the reference site, so both are modelled.
+model ProductParameterGroup {
+  id        Int    @id @default(autoincrement())
+  productId Int
+  name      String @db.VarChar(255)
+  summary   String? @db.Text
+  order     Int    @default(0)
+
+  product Product                     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  items   ProductParameterGroupItem[]
+
+  @@index([productId, order])
+  @@map("product_parameter_groups")
+}
+
+model ProductParameterGroupItem {
+  id      Int    @id @default(autoincrement())
+  groupId Int
+  name    String @db.VarChar(255)
+  order   Int    @default(0)
+
+  group ProductParameterGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, order])
+  @@map("product_parameter_group_items")
+}
+
+model ProductPreparationStep {
+  id        Int     @id @default(autoincrement())
+  productId Int
+  title     String? @db.VarChar(255)
+  text      String  @db.Text
+  icon      String? @db.VarChar(255)
+  order     Int     @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, order])
+  @@map("product_preparation_steps")
+}
+
+model ProductProcessStep {
+  id        Int     @id @default(autoincrement())
+  productId Int
+  icon      String? @db.VarChar(255)
+  text      String  @db.Text
+  order     Int     @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, order])
+  @@map("product_process_steps")
+}
+
+model ProductAudienceItem {
+  id        Int    @id @default(autoincrement())
+  productId Int
+  text      String @db.Text
+  order     Int    @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, order])
+  @@map("product_audience_items")
+}
+
+model ProductFaq {
+  id        Int    @id @default(autoincrement())
+  productId Int
+  question  String @db.VarChar(500)
+  answer    String @db.Text
+  order     Int    @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, order])
+  @@map("product_faqs")
+}
+
+model Category {
+  id          Int     @id @default(autoincrement())
+  slug        String  @db.VarChar(191)
+  name        String  @db.VarChar(191)
+  parentId    Int?
+  // Full materialised path, e.g. "tests/diabetes-tests", so the website's
+  // nested archive URLs resolve in one query.
+  path        String  @unique @db.VarChar(191)
+  description String? @db.Text
+  imageId     Int?
+  menuOrder   Int     @default(0)
+  isVisible   Boolean @default(true)
+
+  metaTitle       String? @db.VarChar(255)
+  metaDescription String? @db.VarChar(500)
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryTree")
+  image    Upload?    @relation(fields: [imageId], references: [id], onDelete: SetNull)
+
+  products         ProductCategory[]
+  couponCategories CouponCategory[]
+
+  @@unique([parentId, slug])
+  @@index([menuOrder])
+  @@map("categories")
+}
+
+// Backs the homepage "Choose Test by Organ" tiles.
+model Tag {
+  id        Int     @id @default(autoincrement())
+  slug      String  @unique @db.VarChar(191)
+  name      String  @db.VarChar(191)
+  icon      String? @db.VarChar(255)
+  iconId    Int?
+  menuOrder Int     @default(0)
+  isVisible Boolean @default(true)
+
+  iconUpload Upload?      @relation(fields: [iconId], references: [id], onDelete: SetNull)
+  products   ProductTag[]
+
+  @@index([menuOrder])
+  @@map("tags")
+}
+
+model ProductCategory {
+  productId  Int
+  categoryId Int
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([productId, categoryId])
+  @@index([categoryId])
+  @@map("product_categories")
+}
+
+model ProductTag {
+  productId Int
+  tagId     Int
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([productId, tagId])
+  @@index([tagId])
+  @@map("product_tags")
+}
+
+// --------------------------------------------------------------- commerce
+
+model Cart {
+  id            Int        @id @default(autoincrement())
+  // Opaque token held by the browser; the cart itself lives here so prices
+  // cannot be edited client-side.
+  token         String     @unique @db.VarChar(64)
+  status        CartStatus @default(ACTIVE)
+  couponId      Int?
+  subtotal      Int        @default(0)
+  discountTotal Int        @default(0)
+  total         Int        @default(0)
+  expiresAt     DateTime
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  coupon Coupon?    @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  items  CartItem[]
+  order  Order?
+
+  @@index([status, expiresAt])
+  @@map("carts")
+}
+
+model CartItem {
+  id        Int      @id @default(autoincrement())
+  cartId    Int
+  productId Int
+  quantity  Int      @default(1)
+  // Snapshot at add-time; re-validated against the product on every read so a
+  // price change is surfaced rather than silently applied at checkout.
+  unitPrice Int
+  createdAt DateTime @default(now())
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId])
+  @@index([productId])
+  @@map("cart_items")
+}
+
+model Order {
+  id          Int    @id @default(autoincrement())
+  orderNumber String @unique @db.VarChar(32)
+
+  status        OrderStatus   @default(PENDING_PAYMENT)
+  paymentStatus PaymentStatus @default(UNPAID)
+
+  cartId Int? @unique
+
+  // Contact for the booking as a whole. No patient accounts this phase, so the
+  // order carries its own contact details.
+  contactName  String  @db.VarChar(191)
+  contactPhone String  @db.VarChar(32)
+  contactEmail String? @db.VarChar(191)
+
+  collectionType CollectionType @default(HOME)
+  centerId       Int?
+  slotDate       DateTime?      @db.Date
+  slotStartTime  String?        @db.VarChar(8)
+  slotEndTime    String?        @db.VarChar(8)
+  phlebotomistId Int?
+
+  subtotal      Int @default(0)
+  discountTotal Int @default(0)
+  collectionFee Int @default(0)
+  taxTotal      Int @default(0)
+  total         Int @default(0)
+  couponId      Int?
+  couponCode    String? @db.VarChar(64)
+
+  notes         String? @db.Text
+  internalNotes String? @db.Text
+
+  placedAt     DateTime?
+  cancelledAt  DateTime?
+  cancelReason String?   @db.VarChar(500)
+  completedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cart         Cart?         @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  center       Center?       @relation(fields: [centerId], references: [id], onDelete: SetNull)
+  phlebotomist Phlebotomist? @relation(fields: [phlebotomistId], references: [id], onDelete: SetNull)
+  coupon       Coupon?       @relation(fields: [couponId], references: [id], onDelete: SetNull)
+
+  items         OrderItem[]
+  patients      OrderPatient[]
+  address       OrderAddress?
+  statusEvents  OrderStatusEvent[]
+  payments      Payment[]
+  reports       Report[]
+  uploads       Upload[]
+  prescriptions Prescription[]
+
+  @@index([status, createdAt])
+  @@index([paymentStatus])
+  @@index([slotDate, centerId])
+  @@index([contactPhone])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        Int @id @default(autoincrement())
+  orderId   Int
+  productId Int?
+
+  // Snapshotted so editing or deleting a product never rewrites history.
+  productTitle String      @db.VarChar(255)
+  productSlug  String      @db.VarChar(191)
+  productType  ProductType
+  unitPrice    Int
+  quantity     Int         @default(1)
+  lineTotal    Int
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  reports Report[]
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+// One booking often covers a whole family — that is how packages get used.
+model OrderPatient {
+  id       Int     @id @default(autoincrement())
+  orderId  Int
+  name     String  @db.VarChar(191)
+  age      Int?
+  gender   Gender  @default(UNDISCLOSED)
+  phone    String? @db.VarChar(32)
+  relation String? @db.VarChar(64)
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reports Report[]
+
+  @@index([orderId])
+  @@map("order_patients")
+}
+
+model OrderAddress {
+  id       Int     @id @default(autoincrement())
+  orderId  Int     @unique
+  line1    String  @db.VarChar(255)
+  line2    String? @db.VarChar(255)
+  landmark String? @db.VarChar(255)
+  city     String  @db.VarChar(120)
+  state    String  @db.VarChar(120)
+  pincode  String  @db.VarChar(16)
+  phone    String? @db.VarChar(32)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("order_addresses")
+}
+
+// Full transition history. Drives the admin timeline and makes "who moved this
+// order and when" answerable.
+model OrderStatusEvent {
+  id         Int          @id @default(autoincrement())
+  orderId    Int
+  fromStatus OrderStatus?
+  toStatus   OrderStatus
+  note       String?      @db.VarChar(500)
+  actorId    Int?
+  createdAt  DateTime     @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt])
+  @@map("order_status_events")
+}
+
+model Payment {
+  id       Int          @id @default(autoincrement())
+  orderId  Int
+  provider String       @default("razorpay") @db.VarChar(32)
+  state    PaymentState @default(CREATED)
+
+  razorpayOrderId   String? @unique @db.VarChar(191)
+  razorpayPaymentId String? @unique @db.VarChar(191)
+  razorpaySignature String? @db.VarChar(255)
+
+  amount        Int
+  currency      String  @default("INR") @db.VarChar(8)
+  method        String? @db.VarChar(64)
+  failureReason String? @db.VarChar(500)
+  rawPayload    Json?
+
+  capturedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  refunds Refund[]
+
+  @@index([orderId])
+  @@index([state])
+  @@map("payments")
+}
+
+model Refund {
+  id              Int         @id @default(autoincrement())
+  paymentId       Int
+  amount          Int
+  reason          String?     @db.VarChar(500)
+  razorpayRefundId String?    @unique @db.VarChar(191)
+  state           RefundState @default(PENDING)
+  actorId         Int?
+  rawPayload      Json?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([paymentId])
+  @@map("refunds")
+}
+
+// Razorpay webhooks arrive more than once. Recording the event id makes
+// processing idempotent.
+model WebhookEvent {
+  id         Int      @id @default(autoincrement())
+  provider   String   @db.VarChar(32)
+  eventId    String   @db.VarChar(191)
+  eventType  String   @db.VarChar(120)
+  payload    Json
+  processedAt DateTime?
+  error      String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  @@unique([provider, eventId])
+  @@index([eventType])
+  @@map("webhook_events")
+}
+
+model Coupon {
+  id              Int         @id @default(autoincrement())
+  code            String      @unique @db.VarChar(64)
+  description     String?     @db.VarChar(500)
+  type            CouponType
+  value           Int
+  scope           CouponScope @default(ALL)
+  minOrderValue   Int?
+  maxDiscount     Int?
+  usageLimit      Int?
+  usageCount      Int         @default(0)
+  perCustomerLimit Int?
+  startsAt        DateTime?
+  endsAt          DateTime?
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  products   CouponProduct[]
+  categories CouponCategory[]
+  carts      Cart[]
+  orders     Order[]
+
+  @@index([isActive, startsAt, endsAt])
+  @@map("coupons")
+}
+
+model CouponProduct {
+  couponId  Int
+  productId Int
+
+  coupon  Coupon  @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([couponId, productId])
+  @@index([productId])
+  @@map("coupon_products")
+}
+
+model CouponCategory {
+  couponId   Int
+  categoryId Int
+
+  coupon   Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([couponId, categoryId])
+  @@index([categoryId])
+  @@map("coupon_categories")
+}
+
+// ---------------------------------------------------- collection & slots
+
+model Center {
+  id                  Int     @id @default(autoincrement())
+  slug                String  @unique @db.VarChar(191)
+  name                String  @db.VarChar(191)
+  address             String  @db.Text
+  city                String  @db.VarChar(120)
+  state               String  @db.VarChar(120)
+  pincode             String? @db.VarChar(16)
+  phone               String? @db.VarChar(64)
+  email               String? @db.VarChar(191)
+  mapUrl              String? @db.Text
+  latitude            Decimal? @db.Decimal(10, 7)
+  longitude           Decimal? @db.Decimal(10, 7)
+  // { "mon": [["08:00","20:00"]], ... } — displayed, never queried.
+  openingHours        Json?
+  isActive            Boolean @default(true)
+  isHomeCollectionHub Boolean @default(false)
+  menuOrder           Int     @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  slotTemplates  SlotTemplate[]
+  slotExceptions SlotException[]
+  phlebotomists  Phlebotomist[]
+  orders         Order[]
+
+  @@index([isActive, menuOrder])
+  @@map("centers")
+}
+
+model SlotTemplate {
+  id        Int     @id @default(autoincrement())
+  centerId  Int
+  dayOfWeek Int // 0 = Sunday
+  startTime String  @db.VarChar(8)
+  endTime   String  @db.VarChar(8)
+  capacity  Int     @default(1)
+  isActive  Boolean @default(true)
+
+  center Center @relation(fields: [centerId], references: [id], onDelete: Cascade)
+
+  @@unique([centerId, dayOfWeek, startTime])
+  @@index([centerId, dayOfWeek])
+  @@map("slot_templates")
+}
+
+// Holidays, blackout dates and one-off capacity overrides.
+model SlotException {
+  id        Int      @id @default(autoincrement())
+  centerId  Int?
+  date      DateTime @db.Date
+  startTime String?  @db.VarChar(8)
+  endTime   String?  @db.VarChar(8)
+  isClosed  Boolean  @default(true)
+  capacity  Int?
+  reason    String?  @db.VarChar(255)
+
+  center Center? @relation(fields: [centerId], references: [id], onDelete: Cascade)
+
+  @@index([date])
+  @@map("slot_exceptions")
+}
+
+model Phlebotomist {
+  id        Int     @id @default(autoincrement())
+  name      String  @db.VarChar(191)
+  phone     String? @db.VarChar(32)
+  centerId  Int?
+  isActive  Boolean @default(true)
+  createdAt DateTime @default(now())
+
+  center Center? @relation(fields: [centerId], references: [id], onDelete: SetNull)
+  orders Order[]
+
+  @@index([centerId, isActive])
+  @@map("phlebotomists")
+}
+
+// ------------------------------------------------------------------ files
+
+model Upload {
+  id           Int        @id @default(autoincrement())
+  kind         UploadKind @default(OTHER)
+  originalName String     @db.VarChar(255)
+  // Path relative to STORAGE_LOCAL_ROOT (or the S3 key). Never a URL, so the
+  // storage driver can change without rewriting rows.
+  storedPath   String     @db.VarChar(500)
+  mimeType     String     @db.VarChar(127)
+  sizeBytes    Int
+  checksum     String?    @db.VarChar(64)
+  width        Int?
+  height       Int?
+  altText      String?    @db.VarChar(255)
+  scanStatus   ScanStatus @default(SKIPPED)
+  uploadedById Int?
+  orderId      Int?
+  createdAt    DateTime   @default(now())
+
+  uploadedBy User?  @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  order      Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  productCardImages    Product[]     @relation("ProductCardImage")
+  productDetailImages  Product[]     @relation("ProductDetailImage")
+  productArchiveImages Product[]     @relation("ProductArchiveImage")
+  categories           Category[]
+  tags                 Tag[]
+  prescription         Prescription?
+  report               Report?
+  blogPostsFeatured    BlogPost[]    @relation("BlogPostFeatured")
+  blogPostsOg          BlogPost[]    @relation("BlogPostOg")
+  testimonials         Testimonial[]
+
+  @@index([kind, createdAt])
+  @@index([orderId])
+  @@map("uploads")
+}
+
+// The /upload-prescription/ form becomes a real lead pipeline rather than a
+// form that discards its input.
+model Prescription {
+  id            Int                @id @default(autoincrement())
+  uploadId      Int                @unique
+  patientName   String             @db.VarChar(191)
+  phone         String             @db.VarChar(32)
+  email         String?            @db.VarChar(191)
+  notes         String?            @db.Text
+  status        PrescriptionStatus @default(RECEIVED)
+  internalNotes String?            @db.Text
+  reviewedById  Int?
+  reviewedAt    DateTime?
+  linkedOrderId Int?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  upload      Upload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  reviewedBy  User?  @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
+  linkedOrder Order? @relation(fields: [linkedOrderId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([phone])
+  @@map("prescriptions")
+}
+
+// Reports are never served from a public path — delivery goes through an
+// expiring signed token so a forwarded URL stops working.
+model Report {
+  id             Int          @id @default(autoincrement())
+  orderId        Int
+  orderItemId    Int?
+  orderPatientId Int?
+  uploadId       Int?         @unique
+  title          String       @db.VarChar(255)
+  status         ReportStatus @default(PENDING)
+  publishedAt    DateTime?
+  publishedById  Int?
+
+  accessToken     String?   @unique @db.VarChar(64)
+  tokenExpiresAt  DateTime?
+  downloadCount   Int       @default(0)
+  lastDownloadedAt DateTime?
+
+  deliveredViaEmail    Boolean @default(false)
+  deliveredViaWhatsapp Boolean @default(false)
+  notifiedAt           DateTime?
+
+  withdrawnReason String? @db.VarChar(500)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  order       Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItem   OrderItem?    @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  patient     OrderPatient? @relation(fields: [orderPatientId], references: [id], onDelete: SetNull)
+  upload      Upload?       @relation(fields: [uploadId], references: [id], onDelete: SetNull)
+  publishedBy User?         @relation(fields: [publishedById], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([status, createdAt])
+  @@map("reports")
+}
+
+// ------------------------------------------------------- leads & messaging
+
+model ContactMessage {
+  id            Int        @id @default(autoincrement())
+  name          String?    @db.VarChar(191)
+  email         String     @db.VarChar(191)
+  phone         String?    @db.VarChar(32)
+  message       String     @db.Text
+  source        String?    @db.VarChar(64)
+  status        LeadStatus @default(NEW)
+  assignedToId  Int?
+  internalNotes String?    @db.Text
+  ipAddress     String?    @db.VarChar(64)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  assignedTo User? @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@map("contact_messages")
+}
+
+model NewsletterSubscriber {
+  id                Int              @id @default(autoincrement())
+  email             String           @unique @db.VarChar(191)
+  status            SubscriberStatus @default(SUBSCRIBED)
+  source            String?          @db.VarChar(64)
+  confirmedAt       DateTime?
+  unsubscribedAt    DateTime?
+  unsubscribeToken  String           @unique @db.VarChar(64)
+  createdAt         DateTime         @default(now())
+
+  @@index([status])
+  @@map("newsletter_subscribers")
+}
+
+model CallbackRequest {
+  id        Int        @id @default(autoincrement())
+  name      String     @db.VarChar(191)
+  phone     String     @db.VarChar(32)
+  city      String?    @db.VarChar(120)
+  note      String?    @db.Text
+  status    LeadStatus @default(NEW)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([status, createdAt])
+  @@map("callback_requests")
+}
+
+// ---------------------------------------------------------------- content
+
+model BlogCategory {
+  id          Int     @id @default(autoincrement())
+  slug        String  @unique @db.VarChar(191)
+  name        String  @db.VarChar(191)
+  description String? @db.Text
+  menuOrder   Int     @default(0)
+
+  posts BlogPost[]
+
+  @@map("blog_categories")
+}
+
+model BlogTag {
+  id   Int    @id @default(autoincrement())
+  slug String @unique @db.VarChar(191)
+  name String @db.VarChar(191)
+
+  posts BlogPostTag[]
+
+  @@map("blog_tags")
+}
+
+model BlogPost {
+  id      Int           @id @default(autoincrement())
+  slug    String        @unique @db.VarChar(191)
+  title   String        @db.VarChar(255)
+  excerpt String?       @db.Text
+  // Sanitised HTML for rendering; contentJson is the editor's own document so a
+  // round-trip through the editor is lossless.
+  content String?       @db.Text
+  contentJson Json?
+  status  PublishStatus @default(DRAFT)
+
+  featuredUploadId Int?
+  ogUploadId       Int?
+  categoryId       Int?
+  authorId         Int?
+  authorName       String? @db.VarChar(191)
+
+  readingMinutes Int?
+  isFeatured     Boolean @default(false)
+  viewCount      Int     @default(0)
+
+  metaTitle       String? @db.VarChar(255)
+  metaDescription String? @db.VarChar(500)
+
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  featuredImage Upload?       @relation("BlogPostFeatured", fields: [featuredUploadId], references: [id], onDelete: SetNull)
+  ogImage       Upload?       @relation("BlogPostOg", fields: [ogUploadId], references: [id], onDelete: SetNull)
+  category      BlogCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  author        User?         @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  tags          BlogPostTag[]
+
+  @@index([status, publishedAt])
+  @@index([categoryId, status])
+  @@map("blog_posts")
+}
+
+model BlogPostTag {
+  postId Int
+  tagId  Int
+
+  post BlogPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag  BlogTag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+  @@index([tagId])
+  @@map("blog_post_tags")
+}
+
+model Page {
+  id       Int           @id @default(autoincrement())
+  slug     String        @unique @db.VarChar(191)
+  title    String        @db.VarChar(255)
+  status   PublishStatus @default(PUBLISHED)
+  layout   PageLayout    @default(SECTIONS)
+  bodyHtml String?       @db.Text
+
+  metaTitle       String? @db.VarChar(255)
+  metaDescription String? @db.VarChar(500)
+
+  // Stops anyone deleting /contact-us/ and 404ing a navigation link.
+  isSystem Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sections PageSection[]
+
+  @@map("pages")
+}
+
+// The homepage's 24 sections, about's 9, and contact's cards — typed blocks,
+// not free HTML. `type` is a plain string because the schema registry lives in
+// code: adding a section type must not require a migration. `data` is validated
+// against that registry's Zod schema on every write.
+model PageSection {
+  id        Int     @id @default(autoincrement())
+  pageId    Int
+  type      String  @db.VarChar(64)
+  label     String? @db.VarChar(191)
+  order     Int     @default(0)
+  isVisible Boolean @default(true)
+  data      Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  page Page @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@index([pageId, order])
+  @@map("page_sections")
+}
+
+model Testimonial {
+  id         Int     @id @default(autoincrement())
+  authorName String  @db.VarChar(191)
+  authorMeta String? @db.VarChar(191)
+  rating     Int?
+  quote      String  @db.Text
+  avatarId   Int?
+  source     String? @db.VarChar(64)
+  isVisible  Boolean @default(true)
+  menuOrder  Int     @default(0)
+  createdAt  DateTime @default(now())
+
+  avatar Upload? @relation(fields: [avatarId], references: [id], onDelete: SetNull)
+
+  @@index([isVisible, menuOrder])
+  @@map("testimonials")
+}
+
+model GoogleReview {
+  id         Int      @id @default(autoincrement())
+  authorName String   @db.VarChar(191)
+  rating     Int?
+  quote      String   @db.Text
+  avatarUrl  String?  @db.VarChar(500)
+  reviewedAt DateTime?
+  isVisible  Boolean  @default(true)
+  menuOrder  Int      @default(0)
+
+  @@index([isVisible, menuOrder])
+  @@map("google_reviews")
+}
+
+model Faq {
+  id        Int      @id @default(autoincrement())
+  question  String   @db.VarChar(500)
+  answer    String   @db.Text
+  group     FaqGroup @default(GENERAL)
+  menuOrder Int      @default(0)
+  isVisible Boolean  @default(true)
+
+  @@index([group, menuOrder])
+  @@map("faqs")
+}
+
+model NavItem {
+  id             Int     @id @default(autoincrement())
+  menu           NavMenu
+  label          String  @db.VarChar(191)
+  url            String  @db.VarChar(500)
+  parentId       Int?
+  order          Int     @default(0)
+  opensInNewTab  Boolean @default(false)
+  isVisible      Boolean @default(true)
+
+  parent   NavItem?  @relation("NavTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children NavItem[] @relation("NavTree")
+
+  @@index([menu, order])
+  @@map("nav_items")
+}
+
+// Written automatically when a published slug changes, so content edits never
+// leave a dead link behind.
+model Redirect {
+  id         Int      @id @default(autoincrement())
+  fromPath   String   @unique @db.VarChar(500)
+  toPath     String   @db.VarChar(500)
+  statusCode Int      @default(301)
+  hitCount   Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@map("redirects")
+}
+
+// Every save of a post, page or section is versioned. This is the safety net
+// that makes handing the CMS to a non-technical editor reasonable.
+model ContentRevision {
+  id         Int      @id @default(autoincrement())
+  entityType String   @db.VarChar(64)
+  entityId   Int
+  snapshot   Json
+  note       String?  @db.VarChar(255)
+  actorId    Int?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId, createdAt])
+  @@map("content_revisions")
+}
+
+// ------------------------------------------------------- admin & platform
+
+model User {
+  id               Int       @id @default(autoincrement())
+  email            String    @unique @db.VarChar(191)
+  passwordHash     String    @db.VarChar(255)
+  name             String    @db.VarChar(191)
+  phone            String?   @db.VarChar(32)
+  role             UserRole  @default(SUPER_ADMIN)
+  isActive         Boolean   @default(true)
+  lastLoginAt      DateTime?
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+  mustChangePassword Boolean @default(false)
+
+  passwordResetTokenHash String?   @db.VarChar(255)
+  passwordResetExpiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  refreshTokens    RefreshToken[]
+  auditLogs        AuditLog[]
+  uploads          Upload[]
+  orderStatusEvents OrderStatusEvent[]
+  refunds          Refund[]
+  prescriptions    Prescription[]
+  reportsPublished Report[]
+  contactMessages  ContactMessage[]
+  blogPosts        BlogPost[]
+  contentRevisions ContentRevision[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  tokenHash String   @unique @db.VarChar(255)
+  // Rotation family: reuse of a revoked token revokes the whole family, which
+  // is how a stolen refresh token gets caught.
+  familyId  String   @db.VarChar(64)
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?  @db.VarChar(255)
+  ipAddress String?  @db.VarChar(64)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  actorId    Int?
+  action     String   @db.VarChar(120)
+  entityType String   @db.VarChar(64)
+  entityId   String?  @db.VarChar(64)
+  before     Json?
+  after      Json?
+  ipAddress  String?  @db.VarChar(64)
+  userAgent  String?  @db.VarChar(255)
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Setting {
+  key       String      @id @db.VarChar(191)
+  group     String      @db.VarChar(64)
+  type      SettingType @default(STRING)
+  value     String?     @db.Text
+  label     String?     @db.VarChar(191)
+  helpText  String?     @db.VarChar(500)
+  // Write-only in the admin: API keys are never read back to the client.
+  isSecret  Boolean     @default(false)
+  isPublic  Boolean     @default(false)
+  menuOrder Int         @default(0)
+  updatedAt DateTime    @updatedAt
+
+  @@index([group, menuOrder])
+  @@map("settings")
+}
