@@ -16,6 +16,8 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  // Runtime uses the pooled URL; migration and admin tooling need a direct session.
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------------------------------------------------------------- enums

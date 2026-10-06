@@ -36,7 +36,8 @@ the database URL is not.
 3. Start: `npm start`
 4. Health check path: `/api/v1/health`
 5. Environment: copy from `.env.example`. Set at minimum
-   `NODE_ENV=production`, `DATABASE_URL`, both JWT secrets (real random values —
+   `NODE_ENV=production`, `DATABASE_URL` (pooled Prisma Postgres URL), `DIRECT_URL`
+   (direct Prisma Postgres URL for migrations), both JWT secrets (real random values —
    the app refuses to boot in production while they still say `change-me`),
    `CORS_ORIGINS` (the Vercel website and admin URLs), `TRUST_PROXY=true`,
    `JOB_RUNNER=inline`.
