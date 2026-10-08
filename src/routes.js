@@ -40,9 +40,11 @@ router.use('/prescriptions', prescriptions.publicRouter);
 router.use('/reports', reports.publicRouter);
 
 const content = require('./modules/content/content.routes');
+const leads = require('./modules/leads/leads.routes');
 
 // Blog, pages, testimonials, FAQs, navigation and redirects.
 router.use(content.publicRouter);
+router.use('/contact', leads.publicRouter);
 
 // ----------------------------------------------------------------- admin
 router.use('/admin/auth', require('./modules/auth/auth.routes'));
@@ -61,6 +63,7 @@ router.use('/admin/orders', requireAdmin, require('./modules/orders/orders.admin
 router.use('/admin/prescriptions', prescriptions.adminRouter);
 router.use('/admin/reports', reports.adminRouter);
 router.use('/admin/content', content.adminRouter);
+router.use('/admin/leads', requireAdmin, leads.adminRouter);
 
 router.get('/', (_req, res) => {
   res.json({ name: 'Arova Labs API', version: 1 });
