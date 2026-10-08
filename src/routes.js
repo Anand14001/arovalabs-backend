@@ -28,13 +28,21 @@ router.use('/orders', require('./modules/orders/orders.public.routes'));
  */
 router.use('/payments', require('./modules/payments/payments.routes'));
 
-// Step 6 — files
-// router.use('/prescriptions', require('./modules/prescriptions/prescriptions.public.routes'));
-// router.use('/reports', require('./modules/reports/reports.public.routes'));
+const prescriptions = require('./modules/prescriptions/prescriptions.routes');
+const reports = require('./modules/reports/reports.routes');
 
-// Step 7 — content
-// router.use('/pages', require('./modules/content/pages.public.routes'));
-// router.use('/posts', require('./modules/content/posts.public.routes'));
+router.use('/prescriptions', prescriptions.publicRouter);
+/*
+ * Report download is public by token only — the token is the credential, which
+ * is what lets an emailed or WhatsApped link work without an account. It is
+ * long, random, expiring and revocable.
+ */
+router.use('/reports', reports.publicRouter);
+
+const content = require('./modules/content/content.routes');
+
+// Blog, pages, testimonials, FAQs, navigation and redirects.
+router.use(content.publicRouter);
 
 // ----------------------------------------------------------------- admin
 router.use('/admin/auth', require('./modules/auth/auth.routes'));
@@ -49,8 +57,10 @@ router.use('/admin/categories', categories.adminRouter);
 router.use('/admin/tags', tags.adminRouter);
 router.use('/admin/media', require('./modules/media/media.routes'));
 
-// Step 5 — order management
-// router.use('/admin/orders', requireAdmin, require('./modules/orders/orders.admin.routes'));
+router.use('/admin/orders', requireAdmin, require('./modules/orders/orders.admin.routes'));
+router.use('/admin/prescriptions', prescriptions.adminRouter);
+router.use('/admin/reports', reports.adminRouter);
+router.use('/admin/content', content.adminRouter);
 
 router.get('/', (_req, res) => {
   res.json({ name: 'Arova Labs API', version: 1 });

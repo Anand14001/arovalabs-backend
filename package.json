@@ -45,6 +45,7 @@
     "pino": "^9.6.0",
     "pino-http": "^10.4.0",
     "razorpay": "^2.9.8",
+    "sanitize-html": "^2.18.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

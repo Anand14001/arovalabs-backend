@@ -34,6 +34,13 @@ const schema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+  /*
+   * The pooled connection is for the running app; the Prisma CLI needs a direct
+   * session for migrations and studio. Optional here because the server itself
+   * never reads it — but `prisma migrate` fails without it, so it is declared
+   * rather than left as an undocumented surprise.
+   */
+  DIRECT_URL: z.string().optional(),
 
   PUBLIC_URL: z.string().url().default('http://localhost:5173'),
   ADMIN_URL: z.string().url().default('http://localhost:5174'),

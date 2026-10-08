@@ -16,6 +16,7 @@ const logger = require('../src/lib/logger');
 const env = require('../src/config/env');
 const { hashPassword } = require('../src/lib/password');
 const { importCatalog } = require('./import-catalog');
+const { importContent } = require('./import-content');
 
 // Grouped the same way the admin's Settings tabs are, so a new setting shows up
 // in the right place without any extra wiring.
@@ -233,6 +234,9 @@ async function main() {
   // Products, categories, tags and their images, read straight out of
   // website/src/data/ — see import-catalog.js.
   await importCatalog();
+  // Blog, page sections, testimonials, FAQs and navigation — everything an
+  // editor might reasonably want to change.
+  await importContent();
   logger.info('seed complete');
 }
 

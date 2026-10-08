@@ -33,14 +33,27 @@ const markPaid = async ({ orderId, paymentId, method, rawPayload }, req) => {
     });
     if (!order) throw ApiError.notFound('Order not found.');
 
+    /*
+     * The payment row is reconciled on every call, including replays.
+     *
+     * This used to be skipped once the order was already PAID, which meant a
+     * second callback — a double-submitted handler, a retry, or the webhook
+     * arriving after the browser — left the payment stuck at AUTHORIZED. An
+     * order in that state reports nothing refundable, so refunding a booking
+     * that was genuinely charged became impossible.
+     */
+    await tx.payment.updateMany({
+      where: {
+        orderId,
+        ...(paymentId ? { razorpayPaymentId: paymentId } : {}),
+        state: { not: 'CAPTURED' },
+      },
+      data: { state: 'CAPTURED', method: method ?? null, capturedAt: new Date(), rawPayload },
+    });
+
     if (order.paymentStatus === 'PAID') {
       return { changed: false, order };
     }
-
-    await tx.payment.updateMany({
-      where: { orderId, razorpayPaymentId: paymentId },
-      data: { state: 'CAPTURED', method: method ?? null, capturedAt: new Date(), rawPayload },
-    });
 
     await tx.order.update({
       where: { id: orderId },
@@ -111,7 +124,13 @@ const verifyFromCheckout = async (
 
   await prisma.payment.update({
     where: { id: payment.id },
-    data: { razorpayPaymentId, razorpaySignature: signature, state: 'AUTHORIZED' },
+    data: {
+      razorpayPaymentId,
+      razorpaySignature: signature,
+      // Forward only. Setting AUTHORIZED unconditionally pulled an already
+      // captured payment backwards whenever this callback was replayed.
+      ...(payment.state === 'CREATED' ? { state: 'AUTHORIZED' } : {}),
+    },
   });
 
   const { changed } = await markPaid(
