@@ -64,6 +64,9 @@ router.use('/admin/prescriptions', prescriptions.adminRouter);
 router.use('/admin/reports', reports.adminRouter);
 router.use('/admin/content', content.adminRouter);
 router.use('/admin/leads', requireAdmin, leads.adminRouter);
+router.use('/admin/coupons', requireAdmin, require('./modules/coupons/coupons.admin.routes').adminRouter);
+router.use('/admin/centers', requireAdmin, require('./modules/centers/centers.admin.routes').adminRouter);
+router.use('/admin/analytics', require('./modules/analytics/analytics.routes'));
 
 router.get('/', (_req, res) => {
   res.json({ name: 'Arova Labs API', version: 1 });
