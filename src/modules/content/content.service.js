@@ -46,13 +46,13 @@ const toPost = (p, { full = false } = {}) => ({
   tags: (p.tags ?? []).map((t) => t.tag.name),
   ...(full
     ? {
-        content: p.content ?? '',
-        seo: {
-          metaTitle: p.metaTitle ?? p.title,
-          metaDescription: p.metaDescription ?? p.excerpt ?? null,
-          ogImage: imageOf(p.ogImage) ?? imageOf(p.featuredImage),
-        },
-      }
+      content: p.content ?? '',
+      seo: {
+        metaTitle: p.metaTitle ?? p.title,
+        metaDescription: p.metaDescription ?? p.excerpt ?? null,
+        ogImage: imageOf(p.ogImage) ?? imageOf(p.featuredImage),
+      },
+    }
     : {}),
 });
 
@@ -77,11 +77,11 @@ const listPosts = async ({ page, limit, category, tag, q, status }) => {
     ...(tag ? { tags: { some: { tag: { slug: tag } } } } : {}),
     ...(q
       ? {
-          OR: [
-            { title: { contains: q, mode: 'insensitive' } },
-            { excerpt: { contains: q, mode: 'insensitive' } },
-          ],
-        }
+        OR: [
+          { title: { contains: q, mode: 'insensitive' } },
+          { excerpt: { contains: q, mode: 'insensitive' } },
+        ],
+      }
       : {}),
   };
 
@@ -108,7 +108,7 @@ const getPostBySlug = async (slug) => {
   // Fire-and-forget: a view counter must never slow down or fail a page load.
   prisma.blogPost
     .update({ where: { id: post.id }, data: { viewCount: { increment: 1 } } })
-    .catch(() => {});
+    .catch(() => { });
 
   const [prev, next] = await Promise.all([
     prisma.blogPost.findFirst({

@@ -57,7 +57,9 @@ const schema = z.object({
   // The first admin account, created by the seed. Changing these later does not
   // alter an existing account — the seed only creates one if none exists.
   ADMIN_EMAIL: z.string().email().default('admin@arovalabs.com'),
-  ADMIN_PASSWORD: z.string().min(8).default('Admin@123'),
+  // Development keeps a convenience fallback; production requires an
+  // explicitly configured, unique bootstrap secret below.
+  ADMIN_PASSWORD: z.string().min(8).optional(),
   ADMIN_NAME: z.string().default('Arova Admin'),
 
   // Razorpay
@@ -106,6 +108,21 @@ const isProduction = env.NODE_ENV === 'production';
 // Defaults that are fine locally are not fine in production.
 if (isProduction) {
   const problems = [];
+  const bootstrapPassword = env.ADMIN_PASSWORD;
+  const knownBootstrapPasswords = new Set([
+    'admin@123',
+    'change-me-before-production',
+  ]);
+  if (!bootstrapPassword) {
+    problems.push('ADMIN_PASSWORD (required; configure a unique secret of at least 16 characters)');
+  } else {
+    if (bootstrapPassword.length < 16) {
+      problems.push('ADMIN_PASSWORD (must be at least 16 characters)');
+    }
+    if (knownBootstrapPasswords.has(bootstrapPassword.toLowerCase())) {
+      problems.push('ADMIN_PASSWORD (known development placeholder is not allowed)');
+    }
+  }
   if (env.JWT_ACCESS_SECRET.includes('change-me')) problems.push('JWT_ACCESS_SECRET');
   if (env.JWT_REFRESH_SECRET.includes('change-me')) problems.push('JWT_REFRESH_SECRET');
   if (env.CORS_ORIGINS.length === 0) problems.push('CORS_ORIGINS');
@@ -122,6 +139,9 @@ if (isProduction) {
     process.exit(1);
   }
 }
+
+// Retain the documented local convenience for fresh development/test setups.
+if (!isProduction && !env.ADMIN_PASSWORD) env.ADMIN_PASSWORD = 'Admin@123';
 
 // In development the Vite dev servers are always allowed, so a fresh clone
 // works without anyone editing CORS_ORIGINS first.

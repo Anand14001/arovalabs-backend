@@ -137,15 +137,15 @@ const getRelated = async (slug, take = 8) => {
 
   const sameCategory = categoryIds.length
     ? await prisma.product.findMany({
-        where: {
-          status: 'PUBLISHED',
-          id: { not: product.id },
-          categories: { some: { categoryId: { in: categoryIds } } },
-        },
-        include: CARD_INCLUDE,
-        orderBy: ORDER_BY.menu_order,
-        take,
-      })
+      where: {
+        status: 'PUBLISHED',
+        id: { not: product.id },
+        categories: { some: { categoryId: { in: categoryIds } } },
+      },
+      include: CARD_INCLUDE,
+      orderBy: ORDER_BY.menu_order,
+      take,
+    })
     : [];
 
   if (sameCategory.length >= take) return sameCategory.map(serializer.toCard);
@@ -397,10 +397,14 @@ const update = async (id, data, req) => {
     action: 'product.updated',
     entityType: 'Product',
     entityId: id,
-    before: { slug: existing.slug, title: existing.title, status: existing.status,
-      regularPrice: existing.regularPrice, salePrice: existing.salePrice },
-    after: { slug: product.slug, title: product.title, status: product.status,
-      regularPrice: product.regularPrice, salePrice: product.salePrice },
+    before: {
+      slug: existing.slug, title: existing.title, status: existing.status,
+      regularPrice: existing.regularPrice, salePrice: existing.salePrice
+    },
+    after: {
+      slug: product.slug, title: product.title, status: product.status,
+      regularPrice: product.regularPrice, salePrice: product.salePrice
+    },
   });
 
   return serializer.toAdmin(product);

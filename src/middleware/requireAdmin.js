@@ -14,6 +14,7 @@ const ApiError = require('../lib/ApiError');
 const prisma = require('../lib/prisma');
 const { verifyAccessToken } = require('../lib/tokens');
 const asyncHandler = require('../lib/asyncHandler');
+const env = require('../config/env');
 
 const bearerFrom = (req) => {
   const header = req.get('authorization');
@@ -48,6 +49,16 @@ const requireAdmin = asyncHandler(async (req, _res, next) => {
 
   if (!user) throw ApiError.unauthorized('Account no longer exists.');
   if (!user.isActive) throw ApiError.forbidden('This account has been deactivated.');
+
+  if (user.mustChangePassword) {
+    const path = req.originalUrl.split('?')[0].replace(/\/$/, '');
+    const allowed =
+      (req.method === 'GET' && path === `${env.API_PREFIX}/admin/auth/me`) ||
+      (req.method === 'POST' && path === `${env.API_PREFIX}/admin/auth/change-password`);
+    if (!allowed) {
+      throw ApiError.forbidden('Change your password before continuing.');
+    }
+  }
 
   req.user = user;
   next();

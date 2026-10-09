@@ -211,19 +211,13 @@ async function seedAdmin() {
       passwordHash: await hashPassword(env.ADMIN_PASSWORD),
       role: 'SUPER_ADMIN',
       isActive: true,
-      // Left false deliberately: the password was chosen on purpose rather than
-      // generated, so there is nothing to force a change away from on first login.
-      mustChangePassword: false,
+      // Production bootstrap credentials are one-time; the auth gate requires
+      // a password change before the account can use other admin endpoints.
+      mustChangePassword: env.isProduction,
     },
   });
 
   logger.info({ email: user.email }, 'admin account created');
-
-  if (env.isProduction && env.ADMIN_PASSWORD === 'Admin@123') {
-    logger.warn(
-      'The admin account was created with the default development password. Change it before this site is public.',
-    );
-  }
 }
 
 async function main() {

@@ -93,11 +93,17 @@ PUBLIC_URL=https://arovalabs.com
 ADMIN_URL=https://admin.arovalabs.com
 API_URL=https://api.arovalabs.com
 COOKIE_DOMAIN=.arovalabs.com
+# Set ADMIN_PASSWORD in the hosting secret store (unique, at least 16 characters)
 TRUST_PROXY=true
 STORAGE_LOCAL_ROOT=/home/<cpanel-user>/arova-storage
 JOB_RUNNER=external
 INTERNAL_JOB_TOKEN=<random>
 ```
+
+Set `ADMIN_PASSWORD` through the hosting provider's environment or secret
+management interface. Do not commit the actual value. It is used only when
+the seed creates the first account; production marks that account for a
+password change before any other admin API operation is allowed.
 
 `STORAGE_LOCAL_ROOT` **must** be outside `public_html`. Prescriptions and lab
 reports are patient data; if they sit under a document root, Apache will serve
